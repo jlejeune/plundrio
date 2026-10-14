@@ -49,4 +49,12 @@ type Config struct {
 	// uploads into "<folder>/tv"). When false (the default), all transfers are
 	// added directly to the configured folder.
 	UseCategoriesPutio bool
+
+	// KeepSeeding, when true, leaves the source file on Put.io after the local
+	// download so Put.io keeps seeding, and only reports a transfer as removable
+	// to the *arr apps once Put.io has finished seeding (status COMPLETED). The
+	// *arr app's torrent-remove then deletes the Put.io file and transfer as
+	// usual. When false (the default), the source file is deleted as soon as
+	// the local copy is complete, which ends seeding immediately.
+	KeepSeeding bool
 }

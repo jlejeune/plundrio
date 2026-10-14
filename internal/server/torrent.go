@@ -356,8 +356,12 @@ func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (inte
 		// per-torrent idle limit has been exceeded. Put.io owns seeding, so a
 		// processed local transfer can report that limit as reached. Remote
 		// completion alone must never authorize removal before the local copy.
+		// With keep-seeding the source file is still on Put.io, so removal is
+		// only authorized once Put.io reports the transfer COMPLETED (seeding
+		// finished); a SEEDING transfer must stay in the *arr queue.
 		if transferCtx != nil && transferCtx.GetState() == download.TransferLifecycleProcessed &&
-			status == trStatusSeed && leftUntilDone == 0 {
+			status == trStatusSeed && leftUntilDone == 0 &&
+			(!s.cfg.KeepSeeding || t.Status == "COMPLETED") {
 			seedIdleMode = transmissionLimitModeSingle
 			secondsSeeding = 1
 		}

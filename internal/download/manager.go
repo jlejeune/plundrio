@@ -198,6 +198,15 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 			return nil
 		}
 
+		// With keep-seeding the source stays on Put.io so seeding continues;
+		// torrent-remove deletes it once the *arr app is told seeding is over.
+		if m.cfg.KeepSeeding {
+			log.Info("cleanup").
+				Int64("transfer_id", transferID).
+				Msg("Keeping source file on Put.io until seeding finishes")
+			return nil
+		}
+
 		// Delete only the source file from Put.io, but keep the transfer
 		if err := m.client.DeleteFile(m.Context(), state.FileID); err != nil {
 			log.Error("cleanup").
