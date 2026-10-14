@@ -246,6 +246,7 @@ listen: ":9091"                # Transmission RPC server address
 workers: 4                     # Number of download workers
 use-categories-target: false   # Put local downloads into per-category subfolders (e.g. <target>/tv)
 use-categories-putio: false    # Create per-category subfolders on put.io (e.g. <folder>/tv)
+keep-seeding: false            # Keep source files on put.io until seeding finishes
 stalled-transfer-timeout: 6h   # Report unchanged Put.io downloads after this duration (0 disables)
 download_start_window:         # Optional local download start window
   enabled: false
@@ -259,6 +260,18 @@ log_level: "info"              # Log level (trace,debug,info,warn,error,fatal,pa
 A temporary move to `COMPLETING` preserves the no-progress baseline, but stall errors are reported only in `DOWNLOADING`. Any change in the byte count resets the baseline, including during `COMPLETING`; completion, other inactive states, and disappearance from the monitored list discard it. Restarting plundrio establishes a fresh observation window. Detection may occur up to one polling interval after the timeout.
 
 `download_start_window` only gates when plundrio may begin a new local download. It does not stop Put.io transfers from being created, and it does not interrupt downloads that are already in progress.
+
+#### Keep seeding
+
+When the local download completes, plundrio deletes the source file on put.io by default. It also reports the transfer as removable, so the *arr app removes it right after the import. Seeding on put.io then stops after a few seconds. Private trackers that require a seed ratio or a minimum seed time do not accept this.
+
+To keep seeding, set `keep-seeding` (`PLDR_KEEP_SEEDING=true`). Plundrio then does these steps:
+
+1. It keeps the source file on put.io after the local download, so put.io continues to seed.
+2. It reports the transfer as removable only after put.io reports it `COMPLETED` (seeding finished). Until then, the transfer stays in the *arr queue as a seeding torrent.
+3. The `torrent-remove` of the *arr app deletes the put.io file, the transfer, and optionally the local copy. If the file delete fails, plundrio keeps the transfer and still reports it as removable. The *arr app then tries again on its next refresh.
+
+The files on put.io use your put.io storage quota while they seed. The default is `false`, which keeps the previous behavior.
 
 #### Category subfolders
 
@@ -281,6 +294,7 @@ export PLDR_LISTEN=:9091
 export PLDR_WORKERS=4
 export PLDR_USE_CATEGORIES_TARGET=true
 export PLDR_USE_CATEGORIES_PUTIO=true
+export PLDR_KEEP_SEEDING=true
 export PLDR_STALLED_TRANSFER_TIMEOUT=6h
 export PLDR_DOWNLOAD_START_WINDOW_ENABLED=true
 export PLDR_DOWNLOAD_START_WINDOW_START=23:00

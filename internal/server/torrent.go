@@ -292,6 +292,23 @@ func (s *Server) putioFolderForCategory(ctx context.Context, category string) (i
 	return parent, nil
 }
 
+// removableByArr reports whether torrent-get can tell the *arr app to remove
+// the torrent. Arr clients remove a seeding torrent only after it passes its
+// per-torrent idle limit. Put.io owns seeding, so a processed local transfer
+// can report that it reached the limit. Remote completion alone must never
+// allow removal before the local copy is complete. With keep-seeding the
+// source file is still on Put.io. Then only a COMPLETED Put.io status (seeding
+// finished) allows removal, and a SEEDING transfer stays in the *arr queue.
+func (s *Server) removableByArr(transferCtx *download.TransferContext, prog progressResult, putioStatus string) bool {
+	if transferCtx == nil || transferCtx.GetState() != download.TransferLifecycleProcessed {
+		return false
+	}
+	if prog.Status != trStatusSeed || prog.LeftUntilDone != 0 {
+		return false
+	}
+	return !s.cfg.KeepSeeding || putioStatus == "COMPLETED"
+}
+
 // handleTorrentGet processes torrent-get requests
 func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
@@ -352,12 +369,7 @@ func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (inte
 		seedIdleMode := transmissionLimitModeUnlimited
 		secondsSeeding := int64(0)
 
-		// Arr clients treat a seeding torrent as removable only after its
-		// per-torrent idle limit has been exceeded. Put.io owns seeding, so a
-		// processed local transfer can report that limit as reached. Remote
-		// completion alone must never authorize removal before the local copy.
-		if transferCtx != nil && transferCtx.GetState() == download.TransferLifecycleProcessed &&
-			status == trStatusSeed && leftUntilDone == 0 {
+		if s.removableByArr(transferCtx, prog, t.Status) {
 			seedIdleMode = transmissionLimitModeSingle
 			secondsSeeding = 1
 		}
@@ -553,6 +565,26 @@ func (s *Server) handleTorrentRemove(ctx context.Context, args json.RawMessage) 
 			continue
 		}
 
+		// With keep-seeding the source file is still on Put.io. If the local
+		// copy is complete, delete the source before any local state changes.
+		// If that delete fails, torrent-get still reports the torrent as
+		// removable, so the *arr app tries the removal again on its next
+		// refresh. A removal marker would hide the torrent as stopped instead.
+		sourceDeleted := false
+		if s.cfg.KeepSeeding && transfer.FileID != 0 && s.localCopyComplete(transfer.ID) {
+			if err := s.deleteSourceFile(ctx, id, transfer); err != nil {
+				log.Error("rpc").
+					Str("operation", "torrent-remove").
+					Str("id", id.String()).
+					Int64("transfer_id", transfer.ID).
+					Err(err).
+					Msg("Failed to delete kept source file")
+				removalErrors = append(removalErrors, fmt.Errorf("delete source file of transfer %d: %w", transfer.ID, err))
+				continue
+			}
+			sourceDeleted = true
+		}
+
 		// Capture the deletion destination before remote mutation: the monitor
 		// may reclaim the durable category as soon as remote absence is visible.
 		// Ready remote records must be classified before cancellation; the
@@ -576,13 +608,25 @@ func (s *Server) handleTorrentRemove(ctx context.Context, args json.RawMessage) 
 				Str("id", id.String()).
 				Int64("transfer_id", transfer.ID).
 				Msg("Skipping file deletion: transfer has no associated file")
-		} else if err := s.client.DeleteFile(ctx, transfer.FileID); err != nil {
-			log.Error("rpc").
-				Str("operation", "torrent-remove").
-				Str("id", id.String()).
-				Int64("transfer_id", transfer.ID).
-				Err(err).
-				Msg("Failed to delete transfer files")
+		} else if !sourceDeleted {
+			if err := s.deleteSourceFile(ctx, id, transfer); err != nil {
+				log.Error("rpc").
+					Str("operation", "torrent-remove").
+					Str("id", id.String()).
+					Int64("transfer_id", transfer.ID).
+					Err(err).
+					Msg("Failed to delete transfer files")
+				// Without keep-seeding the cleanup hook already deleted the
+				// source, so this failure is only logged. With keep-seeding the
+				// local copy is not complete here, so the cleanup hook did not
+				// run. Keep the transfer record, because without it nothing
+				// deletes the file on Put.io. The removal marker stays, and a
+				// retry of torrent-remove continues here.
+				if s.cfg.KeepSeeding {
+					removalErrors = append(removalErrors, fmt.Errorf("delete source file of transfer %d, retry torrent-remove: %w", transfer.ID, err))
+					continue
+				}
+			}
 		}
 
 		const maxRemovalAttempts = 3
@@ -658,4 +702,35 @@ func deleteLocalData(targetDir, transferName string) error {
 		return fmt.Errorf("path %q is outside target directory %q", absLocal, absTarget)
 	}
 	return os.RemoveAll(absLocal)
+}
+
+// localCopyComplete reports whether the local copy of a transfer is complete
+// and no review or removal holds the transfer.
+func (s *Server) localCopyComplete(transferID int64) bool {
+	if s.dlService.RemovalPending(transferID) || s.dlService.NeedsReview(transferID) {
+		return false
+	}
+	transferCtx, ok := s.dlService.GetTransferContext(transferID)
+	return ok && transferCtx.GetState() == download.TransferLifecycleProcessed
+}
+
+// deleteSourceFile deletes the source file of a transfer on Put.io. A source
+// that is already gone counts as deleted.
+func (s *Server) deleteSourceFile(ctx context.Context, id torrentID, transfer *putio.Transfer) error {
+	err := s.client.DeleteFile(ctx, transfer.FileID)
+	if isPutioNotFound(err) {
+		log.Debug("rpc").
+			Str("operation", "torrent-remove").
+			Str("id", id.String()).
+			Int64("transfer_id", transfer.ID).
+			Msg("Source file is already deleted")
+		return nil
+	}
+	return err
+}
+
+// isPutioNotFound reports whether err is a Put.io NotFound response.
+func isPutioNotFound(err error) bool {
+	var putioErr *putio.ErrorResponse
+	return errors.As(err, &putioErr) && putioErr.Type == "NotFound"
 }

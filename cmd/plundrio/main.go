@@ -80,6 +80,7 @@ var runCmd = &cobra.Command{
 		// PLDR_USE_CATEGORIES_* env vars, and config-file keys all resolve.
 		useCategoriesTarget := viper.GetBool("use-categories-target")
 		useCategoriesPutio := viper.GetBool("use-categories-putio")
+		keepSeeding := viper.GetBool("keep-seeding")
 		stalledTransferTimeout := viper.GetDuration(stalledTransferTimeoutKey)
 		downloadStartWindow := config.DownloadStartWindowConfig{
 			Enabled: viper.GetBool("download_start_window.enabled"),
@@ -94,6 +95,7 @@ var runCmd = &cobra.Command{
 			Int("workers", workerCount).
 			Bool("use_categories_target", useCategoriesTarget).
 			Bool("use_categories_putio", useCategoriesPutio).
+			Bool("keep_seeding", keepSeeding).
 			Str("stalled_transfer_timeout", stalledTransferTimeout.String()).
 			Bool("download_start_window_enabled", downloadStartWindow.Enabled).
 			Str("download_start_window_start", downloadStartWindow.Start).
@@ -137,6 +139,7 @@ var runCmd = &cobra.Command{
 			DownloadStartWindow:    downloadStartWindow,
 			UseCategoriesTarget:    useCategoriesTarget,
 			UseCategoriesPutio:     useCategoriesPutio,
+			KeepSeeding:            keepSeeding,
 		}
 
 		if err := download.ValidateStartWindow(cfg.DownloadStartWindow); err != nil {
@@ -219,6 +222,7 @@ listen: ":9091"							# Transmission RPC server address
 workers: 4									# Number of download workers
 use-categories-target: false # Put local downloads into per-category subfolders (e.g. <target>/tv)
 use-categories-putio: false  # Create per-category subfolders on Put.io (e.g. <folder>/tv)
+keep-seeding: false          # Keep source files on Put.io until seeding finishes (instead of deleting them after the local download)
 stalled-transfer-timeout: 6h # Report unchanged Put.io downloads after this duration (0 disables)
 download_start_window:       # Optional local download start window
   enabled: false
@@ -228,7 +232,7 @@ log_level: "info"					  # Log level (trace,debug,info,warn,error,fatal,panic,non
 
 # Environment variables:
 # PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS,
-# PLDR_USE_CATEGORIES_TARGET, PLDR_USE_CATEGORIES_PUTIO,
+# PLDR_USE_CATEGORIES_TARGET, PLDR_USE_CATEGORIES_PUTIO, PLDR_KEEP_SEEDING,
 # PLDR_STALLED_TRANSFER_TIMEOUT,
 # PLDR_DOWNLOAD_START_WINDOW_ENABLED, PLDR_DOWNLOAD_START_WINDOW_START,
 # PLDR_DOWNLOAD_START_WINDOW_END, PLDR_LOG_LEVEL
@@ -334,6 +338,7 @@ func init() {
 	runCmd.Flags().IntP("workers", "w", 4, "Number of workers")
 	runCmd.Flags().Bool("use-categories-target", false, "Place local downloads into per-category subfolders of the target directory (based on the *arr download-dir)")
 	runCmd.Flags().Bool("use-categories-putio", false, "Create per-category subfolders under the Put.io folder and upload transfers into them")
+	runCmd.Flags().Bool("keep-seeding", false, "Keep source files on Put.io until seeding finishes instead of deleting them after the local download")
 	runCmd.Flags().Duration(stalledTransferTimeoutKey, defaultStalledTransferTimeout, "Report downloading Put.io transfers with no byte progress after this duration (0 disables)")
 	runCmd.Flags().String("log-level", "", "Log level (trace,debug,info,warn,error,fatal,none,pretty)")
 
