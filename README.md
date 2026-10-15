@@ -247,6 +247,7 @@ workers: 4                     # Number of download workers
 use-categories-target: false   # Put local downloads into per-category subfolders (e.g. <target>/tv)
 use-categories-putio: false    # Create per-category subfolders on put.io (e.g. <folder>/tv)
 keep-seeding: false            # Keep source files on put.io until seeding finishes
+keep-seeding-timeout: 0        # With keep-seeding, remove a transfer this long after it finished on put.io (0 disables)
 stalled-transfer-timeout: 6h   # Report unchanged Put.io downloads after this duration (0 disables)
 download_start_window:         # Optional local download start window
   enabled: false
@@ -273,6 +274,8 @@ To keep seeding, set `keep-seeding` (`PLDR_KEEP_SEEDING=true`). Plundrio then do
 
 The files on put.io use your put.io storage quota while they seed. The default is `false`, which keeps the previous behavior.
 
+A torrent that nobody downloads can stay in the `SEEDING` state for a long time, because put.io decides when seeding ends. To set a limit, use `keep-seeding-timeout` (`PLDR_KEEP_SEEDING_TIMEOUT`, for example `72h`). When a transfer is older than this time, counted from the moment it finished on put.io, plundrio reports it as removable even if put.io still seeds it. The *arr app then sends `torrent-remove`, and the put.io file, the transfer, and the local copy are deleted as above. The default is `0`, which disables the limit. The option has no effect when `keep-seeding` is off. The *arr app removes a download only after it imported the files, so a download that was not imported stays in place.
+
 #### Category subfolders
 
 By default plundrio places every download directly in the target directory and adds every transfer to the configured put.io folder, ignoring the category your *arr app requests via the Transmission `download-dir` argument (e.g. `/downloads/tv`). Two independent, opt-in flags change this:
@@ -295,6 +298,7 @@ export PLDR_WORKERS=4
 export PLDR_USE_CATEGORIES_TARGET=true
 export PLDR_USE_CATEGORIES_PUTIO=true
 export PLDR_KEEP_SEEDING=true
+export PLDR_KEEP_SEEDING_TIMEOUT=72h
 export PLDR_STALLED_TRANSFER_TIMEOUT=6h
 export PLDR_DOWNLOAD_START_WINDOW_ENABLED=true
 export PLDR_DOWNLOAD_START_WINDOW_START=23:00

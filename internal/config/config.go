@@ -57,4 +57,11 @@ type Config struct {
 	// the transfer. When false (the default), plundrio deletes the source file
 	// when the local copy is complete, and seeding stops at that time.
 	KeepSeeding bool
+
+	// KeepSeedingTimeout is the longest time a transfer may stay on Put.io after
+	// it finished, when KeepSeeding is on. After that time plundrio reports the
+	// transfer as removable even if Put.io still seeds it, so the *arr app
+	// removes it and the Put.io file and the local copy are deleted. Zero
+	// disables the limit. It has no effect when KeepSeeding is off.
+	KeepSeedingTimeout time.Duration
 }

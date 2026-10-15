@@ -298,15 +298,41 @@ func (s *Server) putioFolderForCategory(ctx context.Context, category string) (i
 // can report that it reached the limit. Remote completion alone must never
 // allow removal before the local copy is complete. With keep-seeding the
 // source file is still on Put.io. Then only a COMPLETED Put.io status (seeding
-// finished) allows removal, and a SEEDING transfer stays in the *arr queue.
-func (s *Server) removableByArr(transferCtx *download.TransferContext, prog progressResult, putioStatus string) bool {
+// finished) allows removal, and a SEEDING transfer stays in the *arr queue,
+// unless it passed the keep-seeding time limit.
+func (s *Server) removableByArr(transferCtx *download.TransferContext, prog progressResult, t *putio.Transfer) bool {
 	if transferCtx == nil || transferCtx.GetState() != download.TransferLifecycleProcessed {
 		return false
 	}
 	if prog.Status != trStatusSeed || prog.LeftUntilDone != 0 {
 		return false
 	}
-	return !s.cfg.KeepSeeding || putioStatus == "COMPLETED"
+	return !s.cfg.KeepSeeding || t.Status == "COMPLETED" || s.seedingTimedOut(t)
+}
+
+// seedingTimedOut reports whether a transfer stayed on Put.io longer than
+// keep-seeding-timeout. The time starts when the transfer finished on Put.io,
+// so it survives a restart of plundrio. The seconds_seeding field of Put.io is
+// not used, because it can be larger than the real time. A transfer without a
+// finish time never times out.
+func (s *Server) seedingTimedOut(t *putio.Transfer) bool {
+	timeout := s.cfg.KeepSeedingTimeout
+	if !s.cfg.KeepSeeding || timeout <= 0 || t.FinishedAt == nil || t.FinishedAt.IsZero() {
+		return false
+	}
+	age := s.currentTime().Sub(t.FinishedAt.Time)
+	if age < timeout {
+		return false
+	}
+	if _, logged := s.seedingTimeoutLogged.LoadOrStore(t.ID, struct{}{}); !logged {
+		log.Info("rpc").
+			Int64("transfer_id", t.ID).
+			Str("name", t.Name).
+			Str("age", age.Round(time.Minute).String()).
+			Str("timeout", timeout.String()).
+			Msg("Keep-seeding time limit reached, reporting transfer as removable")
+	}
+	return true
 }
 
 // handleTorrentGet processes torrent-get requests
@@ -369,7 +395,7 @@ func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (inte
 		seedIdleMode := transmissionLimitModeUnlimited
 		secondsSeeding := int64(0)
 
-		if s.removableByArr(transferCtx, prog, t.Status) {
+		if s.removableByArr(transferCtx, prog, t) {
 			seedIdleMode = transmissionLimitModeSingle
 			secondsSeeding = 1
 		}

@@ -132,7 +132,8 @@ go test -race ./...    # required: most defects here are concurrency bugs
 Coverage: `internal/download` (category store, transfer monitor, shutdown,
 byte accounting, errors, window, keep-seeding markers). Also `internal/server`
 (torrent-add category handling, local-data deletion, progress,
-extract-category, keep-seeding removability, torrent-remove source deletion).
+extract-category, keep-seeding removability and time limit, torrent-remove source
+deletion).
 
 Concurrency fixes carry regression tests that were each confirmed to fail
 against the previous implementation — keep that habit, since a test that
